@@ -41,6 +41,10 @@ jobs:
           cat > "$HOME/pjproject/pjlib/include/pj/config_site.h" <<'EOF'
           #define PJ_CONFIG_ANDROID 1
           #include <pj/config_site_sample.h>
+          /* MediaCodec API (AMediaCodec_setAsyncNotifyCallback) требует Android 28+,
+             а мы собираем под android-24 — отключаем, аудио идёт встроенными кодеками */
+          #undef PJMEDIA_HAS_ANDROID_MEDIACODEC
+          #define PJMEDIA_HAS_ANDROID_MEDIACODEC 0
           EOF
 
       - name: Build all ABIs
