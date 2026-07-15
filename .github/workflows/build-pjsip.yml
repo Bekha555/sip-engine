@@ -1,0 +1,86 @@
+name: Build PJSIP (16 KB aligned)
+
+# Запуск вручную: GitHub -> Actions -> Build PJSIP -> Run workflow.
+# Артефакт jniLibs-16kb содержит libpjsua2.so + libc++_shared.so для всех ABI,
+# собранные NDK r28 (LOAD-сегменты выровнены на 16 KB — требование Google Play
+# для target Android 15+).
+
+on:
+  workflow_dispatch:
+    inputs:
+      pjsip_version:
+        description: "Тег pjproject"
+        required: true
+        default: "2.15.1"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      NDK_VERSION: r28b
+      APP_PLATFORM: android-24   # minSdk модуля chigap
+    steps:
+      - name: Install swig
+        run: sudo apt-get update && sudo apt-get install -y swig
+
+      - name: Download NDK ${{ env.NDK_VERSION }}
+        run: |
+          curl -sSLo ndk.zip "https://dl.google.com/android/repository/android-ndk-${NDK_VERSION}-linux.zip"
+          unzip -q ndk.zip -d "$HOME"
+          echo "ANDROID_NDK_ROOT=$HOME/android-ndk-${NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Clone pjproject ${{ github.event.inputs.pjsip_version }}
+        run: |
+          git clone --depth 1 --branch "${{ github.event.inputs.pjsip_version }}" \
+            https://github.com/pjsip/pjproject.git "$HOME/pjproject"
+          cat > "$HOME/pjproject/pjlib/include/pj/config_site.h" <<'EOF'
+          #define PJ_CONFIG_ANDROID 1
+          #include <pj/config_site_sample.h>
+          EOF
+
+      - name: Build all ABIs
+        run: |
+          set -e
+          cd "$HOME/pjproject"
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          for ABI in armeabi-v7a arm64-v8a x86 x86_64; do
+            echo "===== Building $ABI ====="
+            make distclean || true
+            TARGET_ABI=$ABI ./configure-android --use-ndk-cflags
+            make dep && make
+            make -C pjsip-apps/src/swig clean || true
+            make -C pjsip-apps/src/swig java
+            SO="pjsip-apps/src/swig/java/android/pjsua2/src/main/jniLibs/$ABI/libpjsua2.so"
+            mkdir -p "$GITHUB_WORKSPACE/out/$ABI"
+            cp "$SO" "$GITHUB_WORKSPACE/out/$ABI/"
+          done
+
+      - name: Copy libc++_shared.so from NDK
+        run: |
+          SYSROOT="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib"
+          cp "$SYSROOT/arm-linux-androideabi/libc++_shared.so"  "$GITHUB_WORKSPACE/out/armeabi-v7a/"
+          cp "$SYSROOT/aarch64-linux-android/libc++_shared.so"  "$GITHUB_WORKSPACE/out/arm64-v8a/"
+          cp "$SYSROOT/i686-linux-android/libc++_shared.so"     "$GITHUB_WORKSPACE/out/x86/"
+          cp "$SYSROOT/x86_64-linux-android/libc++_shared.so"   "$GITHUB_WORKSPACE/out/x86_64/"
+
+      - name: Verify 16 KB alignment
+        run: |
+          READELF="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
+          FAIL=0
+          for SO in $(find "$GITHUB_WORKSPACE/out" -name "*.so"); do
+            ALIGNS=$("$READELF" -l "$SO" | awk '/LOAD/ {print $NF}')
+            for A in $ALIGNS; do
+              if [ $((A)) -lt 16384 ]; then
+                echo "NOT ALIGNED (<16384): $SO ($A)"
+                FAIL=1
+              fi
+            done
+          done
+          [ $FAIL -eq 0 ] && echo "All LOAD segments are 16 KB aligned."
+          exit $FAIL
+
+      - name: Upload jniLibs artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: jniLibs-16kb
+          path: out/
