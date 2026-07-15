@@ -12,6 +12,11 @@ on:
         description: "Тег pjproject"
         required: true
         default: "2.15.1"
+  # запасной способ запуска, если кнопка Run workflow не отображается:
+  # git tag pjsip-build-1 && git push origin pjsip-build-1
+  push:
+    tags:
+      - "pjsip-build*"
 
 jobs:
   build:
@@ -29,9 +34,9 @@ jobs:
           unzip -q ndk.zip -d "$HOME"
           echo "ANDROID_NDK_ROOT=$HOME/android-ndk-${NDK_VERSION}" >> "$GITHUB_ENV"
 
-      - name: Clone pjproject ${{ github.event.inputs.pjsip_version }}
+      - name: Clone pjproject
         run: |
-          git clone --depth 1 --branch "${{ github.event.inputs.pjsip_version }}" \
+          git clone --depth 1 --branch "${{ github.event.inputs.pjsip_version || '2.15.1' }}" \
             https://github.com/pjsip/pjproject.git "$HOME/pjproject"
           cat > "$HOME/pjproject/pjlib/include/pj/config_site.h" <<'EOF'
           #define PJ_CONFIG_ANDROID 1
