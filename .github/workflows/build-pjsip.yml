@@ -76,7 +76,9 @@ jobs:
         run: |
           READELF="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
           FAIL=0
-          for SO in $(find "$GITHUB_WORKSPACE/out" -name "*.so"); do
+          # 16 KB-страницы бывают только на 64-битных устройствах — Play проверяет
+          # лишь arm64-v8a и x86_64; 32-битные ABI остаются 4 KB, это норма
+          for SO in $(find "$GITHUB_WORKSPACE/out/arm64-v8a" "$GITHUB_WORKSPACE/out/x86_64" -name "*.so"); do
             ALIGNS=$("$READELF" -l "$SO" | awk '/LOAD/ {print $NF}')
             for A in $ALIGNS; do
               if [ $((A)) -lt 16384 ]; then
