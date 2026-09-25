@@ -1,7 +1,8 @@
 name: Build PJSIP (16 KB aligned)
 
 # Запуск вручную: GitHub -> Actions -> Build PJSIP -> Run workflow.
-# Артефакт jniLibs-16kb содержит libpjsua2.so + libc++_shared.so для всех ABI,
+# Артефакт jniLibs-16kb содержит libpjsua2.so + libc++_shared.so для всех ABI
+# и java/ — SWIG-обёртки org.pjsip.*, сгенерированные той же сборкой,
 # собранные NDK r28 (LOAD-сегменты выровнены на 16 KB — требование Google Play
 # для target Android 15+).
 
@@ -63,6 +64,22 @@ jobs:
             mkdir -p "$GITHUB_WORKSPACE/out/$ABI"
             cp "$SO" "$GITHUB_WORKSPACE/out/$ABI/"
           done
+
+      # Java-обёртки SWIG обязаны быть из той же сборки, что и libpjsua2.so:
+      # native swig_module_init() при загрузке pjsua2JNI ищет все SwigDirector_*
+      # методы, и при расхождении версий падает NoSuchMethodError (так было в v1.0.2).
+      # Java не зависит от ABI — копируем один раз после цикла.
+      - name: Copy SWIG-generated Java
+        run: |
+          set -e
+          JNI=$(find "$HOME/pjproject/pjsip-apps/src/swig/java" -name pjsua2JNI.java | head -1)
+          [ -n "$JNI" ] || { echo "pjsua2JNI.java not found"; exit 1; }
+          echo "Found: $JNI"
+          grep -q SwigDirector_AudioMediaPort "$JNI"
+          SRC="${JNI%/org/pjsip/pjsua2/pjsua2JNI.java}"
+          mkdir -p "$GITHUB_WORKSPACE/out/java"
+          cp -r "$SRC/org" "$GITHUB_WORKSPACE/out/java/"
+          find "$GITHUB_WORKSPACE/out/java" -name "*.java" | wc -l
 
       - name: Copy libc++_shared.so from NDK
         run: |
